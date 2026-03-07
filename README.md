@@ -1,4 +1,4 @@
-# Windsurf Cascade Notifier for Windows
+# Windsurf Cascade Notifier for Windows 
 
 Desktop notifications and audible alerts for Windsurf's Cascade AI assistant on Windows 10/11.
 
