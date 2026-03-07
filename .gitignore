@@ -1,0 +1,10 @@
+# User-specific files created at install time
+*.backup.*
+
+# Editor
+.vscode/
+.idea/
+
+# OS
+Thumbs.db
+Desktop.ini
