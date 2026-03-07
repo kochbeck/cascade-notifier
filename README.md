@@ -44,15 +44,33 @@ Then **restart Windsurf** to load the hooks.
 
 If you use Windsurf's **Remote-WSL** feature to work in WSL2 folders, you need an additional step. Windsurf's WSL-side server reads hooks from `~/.codeium/windsurf/hooks.json` inside the distro, not from the Windows path.
 
-After running the Windows `install.ps1` above, open your WSL distro and run:
+1. **Run the Windows installer first** (`install.ps1`, as described above).
 
-```bash
-bash install-wsl.sh
-```
+2. **Open your WSL distro** (e.g., Ubuntu) and navigate to the project directory. If the repo is cloned on the Windows filesystem:
 
-This creates a `hooks.json` on the Linux side that calls the Windows-side scripts via WSL interop (`powershell.exe`). Sounds and toasts still appear on the Windows desktop.
+   ```bash
+   cd /mnt/c/Users/$USER/path/to/cascade-notifier
+   ```
 
-Then **restart Windsurf** to load the hooks.
+   Replace the path with wherever you cloned the repo.
+
+3. **Run the WSL installer:**
+
+   ```bash
+   bash install-wsl.sh
+   ```
+
+   The script will:
+   - Detect your Windows user profile automatically
+   - Verify that the Windows-side install exists
+   - Create `~/.codeium/windsurf/hooks.json` inside your WSL distro
+   - Preserve any existing non-notifier hooks in that file
+
+   The hook commands call `powershell.exe` via WSL interop, so sounds and toasts still appear on the Windows desktop.
+
+4. **Restart Windsurf** to load the hooks.
+
+> **Note:** If you use multiple WSL distros with Remote-WSL, run `install-wsl.sh` inside each one.
 
 ## Configuration
 
@@ -132,11 +150,16 @@ This removes the hooks from `hooks.json` and optionally deletes the installation
 
 **WSL (if installed):**
 
+Open your WSL distro and navigate to the project directory:
+
 ```bash
+cd /mnt/c/Users/$USER/path/to/cascade-notifier
 bash uninstall-wsl.sh
 ```
 
-This removes the notifier entries from the WSL-side `hooks.json`. Run the Windows uninstall separately to remove the scripts and sounds.
+This removes the notifier entries from `~/.codeium/windsurf/hooks.json` inside the distro. It does not touch the Windows-side install -- run `uninstall.ps1` separately for that.
+
+If you installed into multiple WSL distros, run `uninstall-wsl.sh` inside each one.
 
 ## How It Works
 
@@ -243,7 +266,7 @@ After step 3, Windsurf will stop invoking the notifier hooks and return to norma
 
 ### Manual WSL Uninstall
 
-If `uninstall-wsl.sh` fails (e.g., no `jq`, script missing, etc.), you can remove the WSL-side hooks by hand:
+If `uninstall-wsl.sh` fails (e.g., script missing, etc.), you can remove the WSL-side hooks by hand:
 
 1. **Open the WSL hooks config file** in any editor:
 
