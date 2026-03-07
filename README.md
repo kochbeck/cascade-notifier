@@ -21,6 +21,7 @@ Get notified when Cascade finishes a task, encounters an error, needs your appro
 - **Windows 10 or 11**
 - **Windows PowerShell 5.1** (pre-installed on all Windows 10/11 systems)
 - **Windsurf IDE** with Cascade Hooks support
+- **WSL2** (only if using Remote-WSL -- Windows interop must be enabled)
 
 ## Installation
 
@@ -36,6 +37,22 @@ This will:
 2. Create default configuration
 3. Configure user-level Windsurf hooks at `%USERPROFILE%\.codeium\windsurf\hooks.json`
 4. Install default notification sounds
+
+Then **restart Windsurf** to load the hooks.
+
+### Remote-WSL (WSL2 folders)
+
+If you use Windsurf's **Remote-WSL** feature to work in WSL2 folders, you need an additional step. Windsurf's WSL-side server reads hooks from `~/.codeium/windsurf/hooks.json` inside the distro, not from the Windows path.
+
+After running the Windows `install.ps1` above, open your WSL distro and run:
+
+```bash
+bash install-wsl.sh
+```
+
+This creates a `hooks.json` on the Linux side that calls the Windows-side scripts via WSL interop (`powershell.exe`). Sounds and toasts still appear on the Windows desktop.
+
+> **Tip:** `jq` is recommended (but not required) in WSL so the installer can merge with any existing hooks. Install it with `sudo apt install jq` if needed.
 
 Then **restart Windsurf** to load the hooks.
 
@@ -107,11 +124,21 @@ Get-Content -Tail 20 -Wait "$env:USERPROFILE\.windsurf-notifier\notifications.lo
 
 ## Uninstall
 
+**Windows:**
+
 ```powershell
 powershell.exe -ExecutionPolicy Bypass -File uninstall.ps1
 ```
 
 This removes the hooks from `hooks.json` and optionally deletes the installation directory.
+
+**WSL (if installed):**
+
+```bash
+bash uninstall-wsl.sh
+```
+
+This removes the notifier entries from the WSL-side `hooks.json`. Run the Windows uninstall separately to remove the scripts and sounds.
 
 ## How It Works
 
@@ -132,8 +159,10 @@ Each hook script:
 
 ```
 cascade-notifier/
-├── install.ps1                        # Installer
-├── uninstall.ps1                      # Uninstaller
+├── install.ps1                        # Windows installer
+├── uninstall.ps1                      # Windows uninstaller
+├── install-wsl.sh                     # WSL hooks installer
+├── uninstall-wsl.sh                   # WSL hooks uninstaller
 ├── src/
 │   ├── config/
 │   │   └── default-config.json        # Default preferences
