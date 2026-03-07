@@ -26,29 +26,37 @@ TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
 cp "$WSL_HOOKS_FILE" "${WSL_HOOKS_FILE}.backup.${TIMESTAMP}"
 echo "  Backup created: ${WSL_HOOKS_FILE}.backup.${TIMESTAMP}"
 
-if command -v jq &>/dev/null; then
-    TEMP_FILE="$(mktemp)"
-    trap 'rm -f "$TEMP_FILE"' EXIT
+if command -v python3 &>/dev/null; then
+    python3 -c "
+import json, sys
 
-    jq --arg marker "$NOTIFIER_MARKER" '
-        if .hooks then
-            .hooks |= with_entries(
-                if (.value | type) == "array" then
-                    .value |= [.[] | select(.command | tostring | contains($marker) | not)]
-                else .
-                end
-            )
-        else .
-        end
-    ' "$WSL_HOOKS_FILE" > "$TEMP_FILE"
+marker, path = sys.argv[1], sys.argv[2]
 
-    mv "$TEMP_FILE" "$WSL_HOOKS_FILE"
-    trap - EXIT
+with open(path) as f:
+    data = json.load(f)
+
+if 'hooks' in data:
+    for key, entries in data['hooks'].items():
+        if isinstance(entries, list):
+            data['hooks'][key] = [
+                e for e in entries if marker not in str(e.get('command', ''))
+            ]
+
+with open(path, 'w') as f:
+    json.dump(data, f, indent=2)
+    f.write('\n')
+" "$NOTIFIER_MARKER" "$WSL_HOOKS_FILE"
     echo "  Removed notifier entries from hooks.json"
 else
-    echo "  WARNING: jq not installed -- cannot surgically remove entries." >&2
-    echo "  To finish manually, edit $WSL_HOOKS_FILE and remove entries containing '$NOTIFIER_MARKER'."
-    exit 1
+    # Fallback: remove lines containing the notifier marker.
+    # This is a rough approach -- if the result looks wrong, restore the backup.
+    TEMP_FILE="$(mktemp)"
+    trap 'rm -f "$TEMP_FILE"' EXIT
+    grep -v "$NOTIFIER_MARKER" "$WSL_HOOKS_FILE" > "$TEMP_FILE" || true
+    mv "$TEMP_FILE" "$WSL_HOOKS_FILE"
+    trap - EXIT
+    echo "  Removed notifier lines from hooks.json (grep fallback)"
+    echo "  TIP: Review $WSL_HOOKS_FILE to verify it is still valid JSON."
 fi
 
 echo ""

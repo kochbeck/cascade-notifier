@@ -52,8 +52,6 @@ bash install-wsl.sh
 
 This creates a `hooks.json` on the Linux side that calls the Windows-side scripts via WSL interop (`powershell.exe`). Sounds and toasts still appear on the Windows desktop.
 
-> **Tip:** `jq` is recommended (but not required) in WSL so the installer can merge with any existing hooks. Install it with `sudo apt install jq` if needed.
-
 Then **restart Windsurf** to load the hooks.
 
 ## Configuration
@@ -242,6 +240,22 @@ If `uninstall.ps1` fails to run (e.g., the script files are missing or corrupted
    ```
 
 After step 3, Windsurf will stop invoking the notifier hooks and return to normal operation.
+
+### Manual WSL Uninstall
+
+If `uninstall-wsl.sh` fails (e.g., no `jq`, script missing, etc.), you can remove the WSL-side hooks by hand:
+
+1. **Open the WSL hooks config file** in any editor:
+
+   ```
+   ~/.codeium/windsurf/hooks.json
+   ```
+
+2. **Remove the notifier entries.** Same as the Windows instructions above -- delete entries in `post_run_command` and `post_cascade_response` whose `"command"` value contains `.windsurf-notifier`, leaving empty arrays `[]` if no other entries remain.
+
+3. **Restart Windsurf** to pick up the change.
+
+The WSL-side hooks.json does not control the Windows-side scripts or sounds -- it only tells WSL-mode Windsurf which commands to run. Removing the entries is sufficient to fully disable the notifier in Remote-WSL sessions.
 
 ## Inspired By
 

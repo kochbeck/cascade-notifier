@@ -18,6 +18,16 @@ set -euo pipefail
 # --- Helpers ---
 die() { echo "ERROR: $*" >&2; exit 1; }
 
+# Escape a string for safe embedding inside a JSON string value.
+# Handles backslashes and double-quotes (the only characters that need
+# escaping for the paths/commands we embed).
+json_escape() {
+    local s="$1"
+    s="${s//\\/\\\\}"   # \ → \\
+    s="${s//\"/\\\"}"   # " → \\"
+    printf '%s' "$s"
+}
+
 # --- Detect Windows user profile ---
 # powershell.exe is available in WSL via Windows interop
 if ! command -v powershell.exe &>/dev/null; then
@@ -71,51 +81,64 @@ if [[ -f "$WSL_HOOKS_FILE" ]]; then
     echo "  Backup created: ${WSL_HOOKS_FILE}.backup.${TIMESTAMP}"
 fi
 
-# --- Merge with existing hooks.json ---
-# If jq is available, do a proper merge. Otherwise, warn and overwrite.
+# --- Merge / write hooks.json ---
+POST_RUN_CMD_JSON="$(json_escape "$POST_RUN_CMD")"
+POST_RESPONSE_CMD_JSON="$(json_escape "$POST_RESPONSE_CMD")"
+
 write_fresh_hooks() {
     cat > "$WSL_HOOKS_FILE" <<HOOKSJSON
 {
   "hooks": {
     "post_run_command": [
-      { "command": "${POST_RUN_CMD}", "show_output": false }
+      { "command": "${POST_RUN_CMD_JSON}", "show_output": false }
     ],
     "post_cascade_response": [
-      { "command": "${POST_RESPONSE_CMD}", "show_output": false }
+      { "command": "${POST_RESPONSE_CMD_JSON}", "show_output": false }
     ]
   }
 }
 HOOKSJSON
 }
 
-if [[ -f "$WSL_HOOKS_FILE" ]] && command -v jq &>/dev/null; then
-    echo "  Merging with existing hooks.json (jq detected)..."
+# merge_with_python: parse existing hooks.json, strip old notifier entries,
+# append ours, and write back.  python3 is pre-installed on Ubuntu/Debian WSL.
+merge_with_python() {
+    python3 -c "
+import json, sys
 
-    # Remove any existing notifier entries, then append ours
-    TEMP_FILE="$(mktemp)"
-    trap 'rm -f "$TEMP_FILE"' EXIT
+marker, post_run, post_resp, path = sys.argv[1:5]
 
-    jq --arg marker "$NOTIFIER_MARKER" \
-       --arg postRunCmd "$POST_RUN_CMD" \
-       --arg postResponseCmd "$POST_RESPONSE_CMD" '
-        # Ensure structure exists
-        .hooks //= {} |
-        .hooks.post_run_command //= [] |
-        .hooks.post_cascade_response //= [] |
+try:
+    with open(path) as f:
+        data = json.load(f)
+except Exception:
+    data = {}
 
-        # Remove old notifier entries
-        .hooks.post_run_command = [.hooks.post_run_command[] | select(.command | contains($marker) | not)] |
-        .hooks.post_cascade_response = [.hooks.post_cascade_response[] | select(.command | contains($marker) | not)] |
+hooks = data.setdefault('hooks', {})
+for key in ['post_run_command', 'post_cascade_response']:
+    entries = hooks.get(key, [])
+    if not isinstance(entries, list):
+        entries = []
+    hooks[key] = [e for e in entries if marker not in e.get('command', '')]
 
-        # Append new notifier entries
-        .hooks.post_run_command += [{"command": $postRunCmd, "show_output": false}] |
-        .hooks.post_cascade_response += [{"command": $postResponseCmd, "show_output": false}]
-    ' "$WSL_HOOKS_FILE" > "$TEMP_FILE"
+hooks['post_run_command'].append({'command': post_run, 'show_output': False})
+hooks['post_cascade_response'].append({'command': post_resp, 'show_output': False})
 
-    mv "$TEMP_FILE" "$WSL_HOOKS_FILE"
-    trap - EXIT
+with open(path, 'w') as f:
+    json.dump(data, f, indent=2)
+    f.write('\n')
+" "$NOTIFIER_MARKER" "$POST_RUN_CMD" "$POST_RESPONSE_CMD" "$WSL_HOOKS_FILE"
+}
+
+if [[ -f "$WSL_HOOKS_FILE" ]] && command -v python3 &>/dev/null; then
+    echo "  Merging with existing hooks.json..."
+    if ! merge_with_python 2>/dev/null; then
+        echo "  WARNING: existing hooks.json is malformed -- overwriting it" >&2
+        echo "  (Backup was saved above)"
+        write_fresh_hooks
+    fi
 elif [[ -f "$WSL_HOOKS_FILE" ]]; then
-    echo "  WARNING: jq not installed -- overwriting existing hooks.json" >&2
+    echo "  WARNING: overwriting existing hooks.json (python3 not found for merge)" >&2
     echo "  (Backup was saved above)"
     write_fresh_hooks
 else
