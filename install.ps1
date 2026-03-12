@@ -18,7 +18,7 @@ $HooksFile   = Join-Path $env:USERPROFILE ".codeium\windsurf\hooks.json"
 $ScriptDir  = Split-Path -Parent $MyInvocation.MyCommand.Path
 $SrcBin     = Join-Path $ScriptDir "dist\$BinName"
 $SrcSounds  = Join-Path $ScriptDir "sounds"
-$SrcConfig  = Join-Path $ScriptDir "src\config\default-config.json"
+$SrcConfig  = Join-Path $ScriptDir "config\default-config.json"
 
 if (-not (Test-Path $SrcBin)) {
     Write-Error "Binary not found: $SrcBin"
@@ -51,23 +51,47 @@ if (-not (Test-Path $ConfigFile)) {
     }
 }
 
-# -- Update hooks.json --
+# -- Update hooks.json (merge -- preserve existing non-notifier hooks) --
 $BinPath = Join-Path $BinDir $BinName
+$PcrCmd  = ($BinPath.Replace('\','\\')) + ' pcr'
+$PrcCmd  = ($BinPath.Replace('\','\\')) + ' prc'
+$Marker  = '.windsurf-notifier'
 
-$HooksContent = @"
-{
-  "hooks": {
-    "post_cascade_response": [
-      { "command": "$($BinPath.Replace('\','\\')) pcr", "show_output": false }
-    ],
-    "post_run_command": [
-      { "command": "$($BinPath.Replace('\','\\')) prc", "show_output": false }
-    ]
-  }
+if (Test-Path $HooksFile) {
+    try {
+        $Raw    = Get-Content $HooksFile -Raw -Encoding UTF8
+        $Parsed = $Raw | ConvertFrom-Json
+    } catch {
+        $Parsed = $null
+    }
+} else {
+    $Parsed = $null
 }
-"@
 
-Set-Content -Path $HooksFile -Value $HooksContent -Encoding ASCII
+if ($null -eq $Parsed -or $null -eq $Parsed.hooks) {
+    $Parsed = [PSCustomObject]@{ hooks = [PSCustomObject]@{
+        post_cascade_response = @()
+        post_run_command      = @()
+    }}
+}
+
+# Remove old notifier entries from each hook array.
+foreach ($key in @('post_cascade_response', 'post_run_command')) {
+    $existing = @($Parsed.hooks.$key | Where-Object {
+        $_ -and $_.command -and (-not $_.command.Contains($Marker))
+    })
+    $Parsed.hooks.$key = $existing
+}
+
+# Append new notifier entries.
+$Parsed.hooks.post_cascade_response = @($Parsed.hooks.post_cascade_response) + @(
+    [PSCustomObject]@{ command = $PcrCmd; show_output = $false }
+)
+$Parsed.hooks.post_run_command = @($Parsed.hooks.post_run_command) + @(
+    [PSCustomObject]@{ command = $PrcCmd; show_output = $false }
+)
+
+$Parsed | ConvertTo-Json -Depth 10 | Set-Content -Path $HooksFile -Encoding ASCII
 Write-Host "Updated hooks: $HooksFile"
 
 Write-Host ""

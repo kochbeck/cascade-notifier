@@ -1,6 +1,9 @@
 # User-specific files created at install time
 *.backup.*
 
+# Go build artifacts (linux binary from 'go build ./cmd/win' without -o)
+/win
+
 # Editor
 .vscode/
 .idea/
