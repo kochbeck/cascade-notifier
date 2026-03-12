@@ -1,0 +1,5 @@
+{
+  "tool_info": {
+    "response": "You can handle the error in Go using the errors package. Here is an example:\n\n  if err != nil {\n    return fmt.Errorf(\"wrap: %w\", err)\n  }\n\nThis pattern is idiomatic and works well with errors.Is and errors.As."
+  }
+}

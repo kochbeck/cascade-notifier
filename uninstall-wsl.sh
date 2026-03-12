@@ -1,33 +1,28 @@
 #!/usr/bin/env bash
 #
-# uninstall-wsl.sh - Removes Windsurf Cascade Notifier hooks from WSL
+# uninstall-wsl.sh - Remove cascade-notifier hooks from WSL hooks.json
 #
-# Removes the notifier entries from ~/.codeium/windsurf/hooks.json.
-# Does NOT touch the Windows-side install (use uninstall.ps1 for that).
+# Does NOT touch the Windows-side install. Use uninstall.ps1 for that.
 #
 # Usage:
 #   bash uninstall-wsl.sh
 
 set -euo pipefail
 
-WSL_HOOKS_DIR="$HOME/.codeium/windsurf"
-WSL_HOOKS_FILE="$WSL_HOOKS_DIR/hooks.json"
+WSL_HOOKS_FILE="$HOME/.codeium/windsurf/hooks.json"
 NOTIFIER_MARKER=".windsurf-notifier"
 
-echo "Uninstalling Windsurf Cascade Notifier (WSL hooks)..."
-
 if [[ ! -f "$WSL_HOOKS_FILE" ]]; then
-    echo "  No hooks.json found at $WSL_HOOKS_FILE -- nothing to do."
+    echo "No hooks.json at $WSL_HOOKS_FILE -- nothing to do."
     exit 0
 fi
 
-# Backup
-TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
-cp "$WSL_HOOKS_FILE" "${WSL_HOOKS_FILE}.backup.${TIMESTAMP}"
-echo "  Backup created: ${WSL_HOOKS_FILE}.backup.${TIMESTAMP}"
+TS="$(date +%Y%m%d_%H%M%S)"
+cp "$WSL_HOOKS_FILE" "${WSL_HOOKS_FILE}.backup.${TS}"
+echo "Backup: ${WSL_HOOKS_FILE}.backup.${TS}"
 
 if command -v python3 &>/dev/null; then
-    python3 -c "
+    python3 - "$NOTIFIER_MARKER" "$WSL_HOOKS_FILE" << 'PYEOF'
 import json, sys
 
 marker, path = sys.argv[1], sys.argv[2]
@@ -35,34 +30,27 @@ marker, path = sys.argv[1], sys.argv[2]
 with open(path) as f:
     data = json.load(f)
 
-if 'hooks' in data:
-    for key, entries in data['hooks'].items():
+if "hooks" in data:
+    for key in list(data["hooks"].keys()):
+        entries = data["hooks"][key]
         if isinstance(entries, list):
-            data['hooks'][key] = [
-                e for e in entries if marker not in str(e.get('command', ''))
+            data["hooks"][key] = [
+                e for e in entries
+                if not (isinstance(e, dict) and marker in e.get("command", ""))
             ]
 
-with open(path, 'w') as f:
+with open(path, "w") as f:
     json.dump(data, f, indent=2)
-    f.write('\n')
-" "$NOTIFIER_MARKER" "$WSL_HOOKS_FILE"
-    echo "  Removed notifier entries from hooks.json"
+    f.write("\n")
+PYEOF
+    echo "Removed notifier entries from $WSL_HOOKS_FILE"
 else
-    # Fallback: remove lines containing the notifier marker.
-    # This is a rough approach -- if the result looks wrong, restore the backup.
-    TEMP_FILE="$(mktemp)"
-    trap 'rm -f "$TEMP_FILE"' EXIT
-    grep -v "$NOTIFIER_MARKER" "$WSL_HOOKS_FILE" > "$TEMP_FILE" || true
-    mv "$TEMP_FILE" "$WSL_HOOKS_FILE"
-    trap - EXIT
-    echo "  Removed notifier lines from hooks.json (grep fallback)"
-    echo "  TIP: Review $WSL_HOOKS_FILE to verify it is still valid JSON."
+    # Rough fallback: grep out lines containing the marker.
+    TMPF="$(mktemp)"
+    grep -v "$NOTIFIER_MARKER" "$WSL_HOOKS_FILE" > "$TMPF" || true
+    mv "$TMPF" "$WSL_HOOKS_FILE"
+    echo "Removed notifier lines (grep fallback -- verify JSON is still valid)"
 fi
 
-echo ""
-echo "Uninstall complete!"
-echo "Restart Windsurf to apply changes."
-echo ""
-echo "Note: Windows-side scripts are still installed."
-echo "To remove those too, run on the Windows side:"
-echo "  powershell.exe -ExecutionPolicy Bypass -File uninstall.ps1"
+echo "Done. Restart Windsurf to apply."
+echo "To also remove the Windows binary, run uninstall.ps1 on the Windows side."

@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 #
-# install-wsl.sh - Sets up Windsurf Cascade Notifier hooks for Remote-WSL sessions
+# install-wsl.sh - Configure Windsurf Cascade Notifier hooks for Remote-WSL
 #
-# When Windsurf runs in Remote-WSL mode, it reads hooks.json from the WSL
-# filesystem (~/.codeium/windsurf/hooks.json) instead of the Windows side.
-# This script creates that hooks.json so the notifier works in WSL folders.
+# When Windsurf runs in Remote-WSL mode it reads hooks.json from the WSL
+# filesystem (~/.codeium/windsurf/hooks.json). This script writes that file
+# so that Windsurf invokes the Windows binary directly via WSL interop.
 #
 # Prerequisites:
-#   1. Run install.ps1 on the Windows side first (installs scripts + sounds).
+#   1. Run install.ps1 on the Windows side first.
 #   2. Run this script inside your WSL distro.
 #
 # Usage:
@@ -15,98 +15,71 @@
 
 set -euo pipefail
 
-# --- Helpers ---
 die() { echo "ERROR: $*" >&2; exit 1; }
 
-# Escape a string for safe embedding inside a JSON string value.
-# Handles backslashes and double-quotes (the only characters that need
-# escaping for the paths/commands we embed).
-json_escape() {
-    local s="$1"
-    s="${s//\\/\\\\}"   # \ → \\
-    s="${s//\"/\\\"}"   # " → \\"
-    printf '%s' "$s"
-}
-
-# --- Detect Windows user profile ---
-# powershell.exe is available in WSL via Windows interop
+# -- Locate Windows user profile --
 if ! command -v powershell.exe &>/dev/null; then
-    die "powershell.exe not found. Ensure WSL has Windows interop enabled (see /etc/wsl.conf)."
+    die "powershell.exe not found. Ensure WSL interop is enabled."
 fi
 
-WIN_USERPROFILE="$(powershell.exe -NoProfile -Command 'Write-Host -NoNewline $env:USERPROFILE' 2>/dev/null)" \
-    || die "Could not determine Windows USERPROFILE."
-
-# Trim trailing carriage return that powershell.exe may add
+WIN_USERPROFILE="$(powershell.exe -NoProfile -Command 'Write-Host -NoNewline $env:USERPROFILE' 2>/dev/null)"
 WIN_USERPROFILE="${WIN_USERPROFILE%$'\r'}"
-
-if [[ -z "$WIN_USERPROFILE" ]]; then
-    die "Windows USERPROFILE is empty."
-fi
+[[ -n "$WIN_USERPROFILE" ]] || die "Could not determine Windows USERPROFILE."
 
 echo "Windows profile: $WIN_USERPROFILE"
 
-# --- Verify Windows-side install exists ---
-# Convert Windows path to WSL mount path for validation
-WIN_NOTIFIER_DIR="${WIN_USERPROFILE}\\.windsurf-notifier"
-WSL_MOUNT="$(wslpath "$WIN_USERPROFILE" 2>/dev/null)" \
-    || die "Could not convert Windows path with wslpath. Is this running inside WSL?"
+# -- Verify Windows-side binary exists --
+WSL_WIN_HOME="$(wslpath "$WIN_USERPROFILE" 2>/dev/null)" \
+    || die "Could not convert Windows path with wslpath."
 
-if [[ ! -d "$WSL_MOUNT/.windsurf-notifier" ]]; then
-    die "Windows-side install not found at ${WIN_NOTIFIER_DIR}.
-    Run install.ps1 on the Windows side first:
-      powershell.exe -ExecutionPolicy Bypass -File install.ps1"
+BINARY_WSL="$WSL_WIN_HOME/.windsurf-notifier/bin/cascade-notifier-win.exe"
+if [[ ! -f "$BINARY_WSL" ]]; then
+    die "Binary not found: $BINARY_WSL
+Run install.ps1 on the Windows side first:
+  powershell.exe -ExecutionPolicy Bypass -File install.ps1"
 fi
 
-echo "Windows-side install verified: $WIN_NOTIFIER_DIR"
+echo "Binary found: $BINARY_WSL"
 
-# --- Build hook commands (same as install.ps1 generates) ---
-# These call powershell.exe via WSL interop with the Windows-side script paths.
-HOOKS_DIR="${WIN_USERPROFILE}\\.windsurf-notifier\\hooks"
-POST_RUN_CMD="powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"${HOOKS_DIR}\\post_run_command.ps1\""
-POST_RESPONSE_CMD="powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"${HOOKS_DIR}\\post_cascade_response.ps1\""
+# Build the WSL-style /mnt/c/... path that Windsurf will pass to WSL interop.
+# This is the path as seen from inside WSL when invoking the Windows binary.
+PCR_CMD="${BINARY_WSL} pcr"
+PRC_CMD="${BINARY_WSL} prc"
 
-# --- Prepare WSL hooks.json directory ---
+# -- Prepare hooks.json location --
 WSL_HOOKS_DIR="$HOME/.codeium/windsurf"
 WSL_HOOKS_FILE="$WSL_HOOKS_DIR/hooks.json"
+NOTIFIER_MARKER=".windsurf-notifier"
 
 mkdir -p "$WSL_HOOKS_DIR"
 
-# --- Backup existing hooks.json ---
-NOTIFIER_MARKER=".windsurf-notifier"
-
+# -- Backup existing hooks.json if present --
 if [[ -f "$WSL_HOOKS_FILE" ]]; then
-    TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
-    cp "$WSL_HOOKS_FILE" "${WSL_HOOKS_FILE}.backup.${TIMESTAMP}"
-    echo "  Backup created: ${WSL_HOOKS_FILE}.backup.${TIMESTAMP}"
+    TS="$(date +%Y%m%d_%H%M%S)"
+    cp "$WSL_HOOKS_FILE" "${WSL_HOOKS_FILE}.backup.${TS}"
+    echo "Backup: ${WSL_HOOKS_FILE}.backup.${TS}"
 fi
 
-# --- Merge / write hooks.json ---
-POST_RUN_CMD_JSON="$(json_escape "$POST_RUN_CMD")"
-POST_RESPONSE_CMD_JSON="$(json_escape "$POST_RESPONSE_CMD")"
-
 write_fresh_hooks() {
-    cat > "$WSL_HOOKS_FILE" <<HOOKSJSON
+    cat > "$WSL_HOOKS_FILE" << HOOKSJSON
 {
   "hooks": {
-    "post_run_command": [
-      { "command": "${POST_RUN_CMD_JSON}", "show_output": false }
-    ],
     "post_cascade_response": [
-      { "command": "${POST_RESPONSE_CMD_JSON}", "show_output": false }
+      { "command": "${PCR_CMD}", "show_output": false }
+    ],
+    "post_run_command": [
+      { "command": "${PRC_CMD}", "show_output": false }
     ]
   }
 }
 HOOKSJSON
 }
 
-# merge_with_python: parse existing hooks.json, strip old notifier entries,
-# append ours, and write back.  python3 is pre-installed on Ubuntu/Debian WSL.
-merge_with_python() {
-    python3 -c "
+merge_hooks() {
+    python3 - "$NOTIFIER_MARKER" "$PCR_CMD" "$PRC_CMD" "$WSL_HOOKS_FILE" << 'PYEOF'
 import json, sys
 
-marker, post_run, post_resp, path = sys.argv[1:5]
+marker, pcr, prc, path = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 
 try:
     with open(path) as f:
@@ -114,45 +87,27 @@ try:
 except Exception:
     data = {}
 
-hooks = data.setdefault('hooks', {})
-for key in ['post_run_command', 'post_cascade_response']:
-    entries = hooks.get(key, [])
-    if not isinstance(entries, list):
-        entries = []
-    hooks[key] = [e for e in entries if marker not in e.get('command', '')]
+hooks = data.setdefault("hooks", {})
+for key in ("post_cascade_response", "post_run_command"):
+    hooks[key] = [e for e in hooks.get(key, [])
+                  if isinstance(e, dict) and marker not in e.get("command", "")]
 
-hooks['post_run_command'].append({'command': post_run, 'show_output': False})
-hooks['post_cascade_response'].append({'command': post_resp, 'show_output': False})
+hooks["post_cascade_response"].append({"command": pcr, "show_output": False})
+hooks["post_run_command"].append({"command": prc, "show_output": False})
 
-with open(path, 'w') as f:
+with open(path, "w") as f:
     json.dump(data, f, indent=2)
-    f.write('\n')
-" "$NOTIFIER_MARKER" "$POST_RUN_CMD" "$POST_RESPONSE_CMD" "$WSL_HOOKS_FILE"
+    f.write("\n")
+PYEOF
 }
 
 if [[ -f "$WSL_HOOKS_FILE" ]] && command -v python3 &>/dev/null; then
-    echo "  Merging with existing hooks.json..."
-    if ! merge_with_python 2>/dev/null; then
-        echo "  WARNING: existing hooks.json is malformed -- overwriting it" >&2
-        echo "  (Backup was saved above)"
-        write_fresh_hooks
-    fi
-elif [[ -f "$WSL_HOOKS_FILE" ]]; then
-    echo "  WARNING: overwriting existing hooks.json (python3 not found for merge)" >&2
-    echo "  (Backup was saved above)"
-    write_fresh_hooks
+    merge_hooks || { echo "WARNING: merge failed, overwriting" >&2; write_fresh_hooks; }
 else
     write_fresh_hooks
 fi
 
-echo "  Configured hooks at: $WSL_HOOKS_FILE"
-
+echo "Hooks written: $WSL_HOOKS_FILE"
 echo ""
-echo "Installation complete!"
-echo ""
-echo "  WSL hooks:    $WSL_HOOKS_FILE"
-echo "  Win scripts:  $WIN_NOTIFIER_DIR"
-echo ""
-echo "Next steps:"
-echo "  1. Restart Windsurf to load the hooks"
-echo "  2. Open a folder in WSL via Remote-WSL and test"
+echo "Installation complete. Restart Windsurf to apply."
+echo "Smoke test (from Windows): cascade-notifier-win.exe --test all"

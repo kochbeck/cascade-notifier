@@ -6,6 +6,6 @@
   "task_error": true,
   "approval_required": true,
   "sound_enabled": true,
-  "toast_enabled": true,
+  "toast_enabled": false,
   "debounce_seconds": 5
 }

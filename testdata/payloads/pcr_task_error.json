@@ -1,0 +1,5 @@
+{
+  "tool_info": {
+    "response": "Error: build failed with exit code 1\n\nsrc/main.go:42:5: undefined: foo\ncompilation failed"
+  }
+}

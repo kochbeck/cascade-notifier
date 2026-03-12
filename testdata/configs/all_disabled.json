@@ -1,0 +1,11 @@
+{
+  "enabled": false,
+  "terminal_input": false,
+  "git_commands": false,
+  "task_complete": false,
+  "task_error": false,
+  "approval_required": false,
+  "sound_enabled": false,
+  "toast_enabled": false,
+  "debounce_seconds": 5
+}
